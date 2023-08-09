@@ -1,6 +1,5 @@
-//! `RedisHashBroker` is an actor. It maintains list of connection client session.
-//! And manages available rooms. Peers send messages to other peers in same
-//! room through `RedisHashBroker`.
+mod redis_hash;
+pub mod client;
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -9,11 +8,16 @@ use std::{
 };
 
 use actix::prelude::*;
-use serde::Serialize;
 
 use redis::Commands;
 
-use crate::session::client_action::{ClientAction, ClientActions};
+use crate::{
+    server::{
+        redis_hash::{RedisHash, RedisHashContents},
+        client::{Client, JsonMessage}
+    },
+    session::client_action::{ClientAction, ClientActions}
+};
 
 pub enum SessionMessages {
     Disconnect,
@@ -24,37 +28,6 @@ pub enum SessionMessages {
 pub struct SessionMessage {
     pub id: usize,
     pub message: SessionMessages
-}
-
-type HashUpdateMap = HashMap<String, HashMap<String, String>>;
-
-#[derive(Message, Clone)]
-#[rtype(result = "()")]
-pub struct JsonMessage {
-    pub string: String
-}
-
-impl JsonMessage {
-    pub fn new(serialisable: &impl Serialize) -> JsonMessage {
-        JsonMessage {
-            string: serde_json::to_string(
-                serialisable
-            ).unwrap()
-        }
-    }
-
-    pub fn from(serialisable: impl Serialize) -> JsonMessage {
-        JsonMessage {
-            string: serde_json::to_string(
-                &serialisable
-            ).unwrap()
-        }
-    }
-}
-
-struct Client {
-    running_hashrequests: HashSet<String>,
-    session: Recipient<JsonMessage>
 }
 
 pub struct RedisHashBroker {
@@ -97,10 +70,7 @@ impl RedisHashBroker {
                         }) => {
                             clients.insert(
                                 id,
-                                Client {
-                                    running_hashrequests: HashSet::new(),
-                                    session: addr
-                                }
+                                Client::new(addr)
                             );
                         },
 
@@ -113,7 +83,6 @@ impl RedisHashBroker {
                                 }
                             )
                         }) => {
-                            let mut hash_updates = HashUpdateMap::new();
                             let client = clients.get_mut(&id).unwrap();
                             
                             for hash in hash_names {
@@ -125,25 +94,16 @@ impl RedisHashBroker {
 
                                 // if a novel request, push cached hash-contents
                                 // to the hash-update to be messaged
-                                if !client.running_hashrequests.contains(&hash) {
-                                    if let Ok(hash_contents) = redis_connection.hgetall(&hash) {
-                                        hash_updates.insert(
-                                            hash.to_owned(),
-                                            hash_contents  
-                                        );
-                                    }
-                                    
-                                    client.running_hashrequests.insert(hash.clone());
+                                if !client.hash_caches.contains_key(&hash) {
+                                    client.hash_caches.insert(
+                                        hash.clone(),
+                                        RedisHashContents::new()
+                                    );
                                 }
 
                                 if !hashrequest_queue.contains(&hash) {
                                     hashrequest_queue.push_back(hash);
                                 }
-                            }
-                            if hash_updates.len() > 0 {
-                                client.session.do_send(
-                                    JsonMessage::new(&hash_updates)
-                                );
                             }
                         },
 
@@ -160,7 +120,7 @@ impl RedisHashBroker {
                             
                             for hash in hash_names {
                                 // remove from running list
-                                client.running_hashrequests.remove(&hash);
+                                client.hash_caches.remove(&hash);
 
                                 // remove from hash's clients
                                 if let Some(hash_clients) = hashrequest_clients.get_mut(&hash) {
@@ -179,26 +139,25 @@ impl RedisHashBroker {
                         let hash_clients = hashrequest_clients.get_mut(&hash).unwrap();
                         if hash_clients.len() == 0 {
                             hashrequest_clients.remove(&hash);
-                            break;
                         }
-
-                        let hashcontent: HashMap<String, String> = redis_connection.hgetall(&hash).unwrap();
-                        let json = JsonMessage::from(
-                            HashUpdateMap::from([
-                                (hash.clone(), hashcontent)
-                            ])
-                        );
-                        
-                        for client in hash_clients.drain() {
-                            match clients.get(&client) {
-                                Some(client) => {
-                                    client.session.do_send(json.clone());
-                                },
-                                None => {
-                                    // should probably error
+                        else {
+                            let redishash = RedisHash {
+                                name: hash.clone(),
+                                contents: redis_connection.hgetall(&hash).unwrap()
+                            };
+                            
+                            for client in hash_clients.drain() {
+                                match clients.get(&client) {
+                                    Some(client) => {
+                                        client.update_hash(&redishash);
+                                    },
+                                    None => {
+                                        // should probably error
+                                    }
                                 }
                             }
                         }
+
                     }
                 }
             }),
@@ -215,11 +174,5 @@ impl RedisHashBroker {
         let client_id = *next_client_id;
         *next_client_id += 1;
         client_id
-    }
-}
-
-impl Default for RedisHashBroker {
-    fn default() -> Self {
-        Self::new()
     }
 }

@@ -5,7 +5,14 @@ use std::{time::{Duration, Instant}, sync::mpsc::Sender};
 use actix::prelude::*;
 use actix_web_actors::ws;
 
-use crate::{server::{self, SessionMessages, SessionMessage}, session::client_action::ClientAction};
+use crate::{
+    server::{
+        SessionMessages,
+        SessionMessage,
+        client::JsonMessage
+    },
+    session::client_action::ClientAction
+};
 
 /// How often heartbeat pings are sent
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
@@ -84,10 +91,10 @@ impl Actor for WsChatSession {
 }
 
 /// Handle JsonMessage from RedisHashBroker
-impl Handler<server::JsonMessage> for WsChatSession {
+impl Handler<JsonMessage> for WsChatSession {
     type Result = ();
 
-    fn handle(&mut self, json: server::JsonMessage, ctx: &mut Self::Context) {
+    fn handle(&mut self, json: JsonMessage, ctx: &mut Self::Context) {
         ctx.text(json.string);
     }
 }

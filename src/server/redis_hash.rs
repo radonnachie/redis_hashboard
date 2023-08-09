@@ -1,10 +1,49 @@
-use std::{collections::HashMap, fmt};
+use std::{collections::{HashMap, HashSet}, fmt};
 
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap, Deserializer, de::{Visitor, MapAccess}};
 
 pub type RedisHashContents = HashMap<String, String>;
 
-#[derive(Debug)]
+#[derive(Serialize)]
+pub struct RedisHashContentsUpdate {
+    upsert: RedisHashContents,
+    delete: HashSet<String>
+}
+
+impl RedisHashContentsUpdate {
+    pub fn from(
+        contemporary: &RedisHashContents,
+        previous: &RedisHashContents
+    ) -> Option<RedisHashContentsUpdate> {
+        let mut upsert = RedisHashContents::new();
+
+        for (key, value) in contemporary.iter() {
+            if let Some(previous_value) = previous.get(key) {
+                if previous_value.eq(value) {
+                    continue;
+                }
+            }
+
+            upsert.insert(key.clone(), value.clone());
+        }
+        let delete: HashSet<String> = previous.keys()
+            .filter(
+                |k| !contemporary.contains_key(*k)
+            ).map(
+                |k| k.clone()
+            ).collect();
+        
+        if delete.len() == 0 && upsert.len() == 0 {
+            return None
+        }
+        Some(RedisHashContentsUpdate {
+            upsert,
+            delete
+        })
+    }
+}
+
+
 pub struct RedisHash {
     pub name: String,
     pub contents: RedisHashContents

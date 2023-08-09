@@ -13,7 +13,7 @@ use redis::Commands;
 
 use crate::{
     server::{
-        redis_hash::{RedisHash, RedisHashContents},
+        redis_hash::RedisHash,
         client::{Client, JsonMessage}
     },
     session::client_action::{ClientAction, ClientActions}
@@ -82,24 +82,13 @@ impl RedisHashBroker {
                                     hash_names
                                 }
                             )
-                        }) => {
-                            let client = clients.get_mut(&id).unwrap();
-                            
+                        }) => {                            
                             for hash in hash_names {
                                 // file client's hash-requests
                                 hashrequest_clients
                                     .entry(hash.clone())
                                     .or_insert_with(HashSet::new)
                                     .insert(id);
-
-                                // if a novel request, push cached hash-contents
-                                // to the hash-update to be messaged
-                                if !client.hash_caches.contains_key(&hash) {
-                                    client.hash_caches.insert(
-                                        hash.clone(),
-                                        RedisHashContents::new()
-                                    );
-                                }
 
                                 if !hashrequest_queue.contains(&hash) {
                                     hashrequest_queue.push_back(hash);
@@ -120,7 +109,7 @@ impl RedisHashBroker {
                             
                             for hash in hash_names {
                                 // remove from running list
-                                client.hash_caches.remove(&hash);
+                                client.handle_drop(&hash);
 
                                 // remove from hash's clients
                                 if let Some(hash_clients) = hashrequest_clients.get_mut(&hash) {
@@ -136,20 +125,25 @@ impl RedisHashBroker {
                     }
                 
                     if let Some(hash) = hashrequest_queue.pop_front() {
-                        let hash_clients = hashrequest_clients.get_mut(&hash).unwrap();
-                        if hash_clients.len() == 0 {
-                            hashrequest_clients.remove(&hash);
-                        }
-                        else {
+                        let mut hash_clients = hashrequest_clients.remove(&hash).unwrap();
+                        if hash_clients.len() > 0 {
                             let redishash = RedisHash {
                                 name: hash.clone(),
                                 contents: redis_connection.hgetall(&hash).unwrap()
                             };
                             
-                            for client in hash_clients.drain() {
-                                match clients.get(&client) {
+                            for clientid in hash_clients.drain() {
+                                match clients.get_mut(&clientid) {
                                     Some(client) => {
-                                        client.update_hash(&redishash);
+                                        if !client.update_hash(&redishash) {
+                                            // no update, re-constitute request
+                                            hashrequest_queue.push_back(hash.clone());
+
+                                            hashrequest_clients
+                                                .entry(hash.clone())
+                                                .or_insert_with(HashSet::new)
+                                                .insert(clientid);
+                                        }
                                     },
                                     None => {
                                         // should probably error

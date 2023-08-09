@@ -1,0 +1,9 @@
+services:
+  redis-hashboard:
+    build: .
+    ports:
+      - "8080:8080"
+    links:
+      - "redis:redishost"
+  redis:
+    image: "redis:alpine"

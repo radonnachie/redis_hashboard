@@ -13,13 +13,12 @@ use serde::Serialize;
 
 use redis::Commands;
 
-pub type HashNameSet = HashSet<String>;
+use crate::session::client_action::{ClientAction, ClientActions};
 
 pub enum SessionMessages {
     Disconnect,
     Connect(Recipient<JsonMessage>),
-    Request(HashNameSet),
-    Drop(HashNameSet)
+    Action(ClientAction)
 }
 
 pub struct SessionMessage {
@@ -76,7 +75,7 @@ impl RedisHashBroker {
                 let mut hashrequest_clients: HashMap<String, HashSet<usize>> = HashMap::new();
                 let mut hashrequest_queue: VecDeque<String> = VecDeque::new();
 
-                let redis_client = redis::Client::open("redis://localhost:6379").unwrap();
+                let redis_client = redis::Client::open("redis://redishost:6379").unwrap();
                 let mut redis_connection = redis_client.get_connection().unwrap();
 
                 loop {
@@ -107,12 +106,17 @@ impl RedisHashBroker {
 
                         Ok(SessionMessage {
                             id,
-                            message: SessionMessages::Request(hashes)
+                            message: SessionMessages::Action(
+                                ClientAction {
+                                    action : ClientActions::Request,
+                                    hash_names
+                                }
+                            )
                         }) => {
                             let mut hash_updates = HashUpdateMap::new();
                             let client = clients.get_mut(&id).unwrap();
                             
-                            for hash in hashes {
+                            for hash in hash_names {
                                 // file client's hash-requests
                                 hashrequest_clients
                                     .entry(hash.clone())
@@ -145,17 +149,23 @@ impl RedisHashBroker {
 
                         Ok(SessionMessage {
                             id,
-                            message: SessionMessages::Drop(hashes)
+                            message: SessionMessages::Action(
+                                ClientAction {
+                                    action : ClientActions::Drop,
+                                    hash_names
+                                }
+                            )
                         }) => {
                             let client = clients.get_mut(&id).unwrap();
                             
-                            for hash in hashes {
+                            for hash in hash_names {
                                 // remove from running list
                                 client.running_hashrequests.remove(&hash);
 
-                                // file client's hash-requests
-                                let hash_clients = hashrequest_clients.get_mut(&hash).unwrap();
-                                hash_clients.remove(&id);
+                                // remove from hash's clients
+                                if let Some(hash_clients) = hashrequest_clients.get_mut(&hash) {
+                                    hash_clients.remove(&id);
+                                }
                             }
                         },
 

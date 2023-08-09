@@ -1003,7 +1003,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "redis-hashboard"
+name = "redis_hashboard"
 version = "1.0.0"
 dependencies = [
  "actix",

@@ -1,10 +1,11 @@
+pub mod client_action;
+
 use std::{time::{Duration, Instant}, sync::mpsc::Sender};
 
 use actix::prelude::*;
 use actix_web_actors::ws;
-use serde::Deserialize;
 
-use crate::server::{self, SessionMessages, SessionMessage, HashNameSet};
+use crate::{server::{self, SessionMessages, SessionMessage}, session::client_action::ClientAction};
 
 /// How often heartbeat pings are sent
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
@@ -91,18 +92,6 @@ impl Handler<server::JsonMessage> for WsChatSession {
     }
 }
 
-#[derive(Deserialize)]
-enum ClientActions {
-    Drop,
-    Request
-}
-
-#[derive(Deserialize)]
-struct ClientAction {
-    action: ClientActions,
-    hash_names: HashNameSet
-}
-
 /// WebSocket message handler
 /// Handles messages from the client
 impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsChatSession {
@@ -126,15 +115,11 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsChatSession {
             }
             ws::Message::Text(text) => {
                 match serde_json::from_str::<ClientAction>(&text) {
-                    Ok(ClientAction { action, hash_names }) => {
-                        let message = match action {
-                            ClientActions::Drop => SessionMessages::Drop(hash_names),
-                            ClientActions::Request => SessionMessages::Request(hash_names),
-                        };
+                    Ok(action) => {
                         let _ = self.tx.send(
                             SessionMessage {
                                 id: self.id,
-                                message: message
+                                message: SessionMessages::Action(action)
                             }
                         );
                     },

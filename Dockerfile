@@ -12,5 +12,5 @@ RUN cargo build --release
 # final base, with the build artifact
 FROM rust:slim
 COPY --from=build /redis_hashboard/target/release/redis_hashboard .
-COPY ./static ./static
+COPY ./web_content/dist ./static
 CMD ["./redis_hashboard"]

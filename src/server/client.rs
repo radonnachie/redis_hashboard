@@ -1,6 +1,6 @@
 use crate::server::redis_hash::{RedisHash, RedisHashContents};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use actix::prelude::*;
 use serde::Serialize;
 
@@ -42,27 +42,22 @@ impl Client {
     }
 
 	pub fn update_hash(&mut self, hash: &RedisHash) -> bool {
-        if let Some(previous_content) = self.hash_caches.insert(
+        let previous_content = self.hash_caches.insert(
             hash.name.clone(),
             hash.contents.clone()
+        );
+        match RedisHashContentsUpdate::from(
+            &hash,
+            &previous_content
         ) {
-            match RedisHashContentsUpdate::from(
-                &hash.contents,
-                &previous_content
-            ) {
-                None => {
-                    return false;
-                }
-                Some(update) => {
-                    self.session.do_send(
-                        JsonMessage::from(update)
-                    );
-                }
+            None => {
+                return false;
             }
-        } else {
-            self.session.do_send(
-                JsonMessage::from(hash)
-            );
+            Some(update) => {
+                self.session.do_send(
+                    JsonMessage::from(update)
+                );
+            }
         }
         return true;
 	}

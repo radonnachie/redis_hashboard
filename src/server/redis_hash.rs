@@ -6,43 +6,57 @@ pub type RedisHashContents = HashMap<String, String>;
 
 #[derive(Serialize)]
 pub struct RedisHashContentsUpdate {
+    name: String,
     upsert: RedisHashContents,
     delete: HashSet<String>
 }
 
 impl RedisHashContentsUpdate {
     pub fn from(
-        contemporary: &RedisHashContents,
-        previous: &RedisHashContents
+        contemporary: &RedisHash,
+        previous: &Option<RedisHashContents>
     ) -> Option<RedisHashContentsUpdate> {
-        let mut upsert = RedisHashContents::new();
-
-        for (key, value) in contemporary.iter() {
-            if let Some(previous_value) = previous.get(key) {
-                if previous_value.eq(value) {
-                    continue;
-                }
-            }
-
-            upsert.insert(key.clone(), value.clone());
-        }
-        let delete: HashSet<String> = previous.keys()
-            .filter(
-                |k| !contemporary.contains_key(*k)
-            ).map(
-                |k| k.clone()
-            ).collect();
+        let name = contemporary.name.clone();
         
-        if delete.len() == 0 && upsert.len() == 0 {
-            return None
+        match previous {
+            None => {
+                return Some(RedisHashContentsUpdate {
+                    name,
+                    upsert: contemporary.contents.clone(),
+                    delete: HashSet::new()
+                });
+            }
+            Some(previous_content) => {
+                let mut upsert = RedisHashContents::new();
+                for (key, value) in contemporary.contents.iter() {
+                    if let Some(previous_value) = previous_content.get(key) {
+                        if previous_value.eq(value) {
+                            continue;
+                        }
+                    }
+        
+                    upsert.insert(key.clone(), value.clone());
+                }
+                let delete: HashSet<String> = previous_content.keys()
+                    .filter(
+                        |k| !contemporary.contents.contains_key(*k)
+                    ).map(
+                        |k| k.clone()
+                    ).collect();
+                
+                if delete.len() == 0 && upsert.len() == 0 {
+                    return None
+                }
+
+                return Some(RedisHashContentsUpdate {
+                    name,
+                    upsert,
+                    delete
+                });
+            }
         }
-        Some(RedisHashContentsUpdate {
-            upsert,
-            delete
-        })
     }
 }
-
 
 pub struct RedisHash {
     pub name: String,
